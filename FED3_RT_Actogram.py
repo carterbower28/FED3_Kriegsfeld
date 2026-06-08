@@ -52,7 +52,7 @@ def open_pdf_automatically(filepath):
     except Exception as e:
         print(f"⚠️ Could not automatically open the PDF. You can open it manually. Error: {e}")
 
-def generate_actograms_pdf(xlsx_file, bin_minutes=10, light_start=9, dark_start=21):
+def generate_actograms_pdf(xlsx_file, bin_minutes=10, light_start=11, dark_start=23):
     """Reads every tab and complies the generated actograms into a single PDF."""
     print("Reading workbook tabs...")
     try:
@@ -82,10 +82,10 @@ def generate_actograms_pdf(xlsx_file, bin_minutes=10, light_start=9, dark_start=
                 continue
 
             df[time_col] = pd.to_datetime(df[time_col], errors='coerce')
-            df_pellets = df[df['Event'].astype(str).str.contains('Pellet', case=False, na=False)].copy()
+            df_pellets = df[df['Event'].astype(str).str.contains('PelletInWell', case=False, na=False)].copy()
             
             if df_pellets.empty:
-                print(f"⚠️ Skipping '{tab_name}': No 'Pellet' events found.\n")
+                print(f"⚠️ Skipping '{tab_name}': No 'PelletInWell' events found.\n")
                 continue
 
             df_pellets['Event_Count'] = 1
@@ -98,21 +98,22 @@ def generate_actograms_pdf(xlsx_file, bin_minutes=10, light_start=9, dark_start=
             unique_dates = binned_data['Date'].unique()
             num_days = len(unique_dates)
             
-            fig, axes = plt.subplots(nrows=num_days, ncols=1, figsize=(10, 1.2 * num_days), sharex=True)
+            # Find the absolute maximum value across ALL days to fix the Y-axis scale
+            max_events = binned_data['Event_Count'].max()
+            y_max = (max_events * 1.1) if pd.notna(max_events) and max_events > 0 else 5
+            
+            # Using sharex=True and sharey=True
+            fig, axes = plt.subplots(nrows=num_days, ncols=1, figsize=(10, 1.2 * num_days), sharex=True, sharey=True)
             if num_days == 1:
                 axes = [axes]
                 
             fig.suptitle(f'FED3 Actogram: {tab_name}', fontsize=14, fontweight='bold', y=1.05)
             bar_width_hours = bin_minutes / 60.0
 
-            # --- UPDATED SECTION ---
-            # Added enumerate() to track the index (i) to properly layer the subplots
             for i, (ax, date) in enumerate(zip(axes, unique_dates)):
                 
-                # Fixes the thickness clipping: layers the subplots so the top plots are drawn LAST.
-                # This prevents the subplots below from accidentally covering half of the bottom line.
                 ax.set_zorder(num_days - i)
-                ax.set_facecolor('none') # Prevents backgrounds from hiding lower layers
+                ax.set_facecolor('none') 
                 
                 day_data = binned_data[binned_data['Date'] == date]
                 ax.axvspan(0, light_start, color='lightgray', alpha=0.4, lw=0)
@@ -123,13 +124,24 @@ def generate_actograms_pdf(xlsx_file, bin_minutes=10, light_start=9, dark_start=
                        width=bar_width_hours, color='black', align='edge', edgecolor='none')
                 
                 ax.set_xlim(0, 24)
-                ax.set_ylim(bottom=0) 
-
-                ax.set_ylabel(date.strftime('%Y-%m-%d'), rotation=0, labelpad=40, ha='right', va='center', fontsize=9)
-                ax.set_yticks([]) 
                 
-                for spine in ['top', 'right', 'left']:
+                # Apply the fixed Y-limit
+                ax.set_ylim(0, y_max) 
+                
+                # Limit to a few y-ticks so it isn't completely cluttered with numbers
+                ax.locator_params(axis='y', nbins=3) 
+                ax.tick_params(axis='y', labelsize=8)
+
+                # Date label pad increased to 45 so it doesn't overlap the new Y-axis numbers
+                ax.set_ylabel(date.strftime('%Y-%m-%d'), rotation=0, labelpad=45, ha='right', va='center', fontsize=9)
+                
+                # Keep top and right spines hidden, but keep the LEFT spine visible
+                for spine in ['top', 'right']:
                     ax.spines[spine].set_visible(False)
+                
+                ax.spines['left'].set_visible(True)
+                ax.spines['left'].set_color('black')
+                ax.spines['left'].set_linewidth(1.0)
                 
                 ax.spines['bottom'].set_visible(True)
                 ax.spines['bottom'].set_color('black')
@@ -138,11 +150,11 @@ def generate_actograms_pdf(xlsx_file, bin_minutes=10, light_start=9, dark_start=
                 # Turn off tick marks for all middle days to keep the lines crisp
                 if ax != axes[-1]:
                     ax.tick_params(bottom=False)
-            # -----------------------
 
             axes[-1].set_xlabel('Time of Day (h)', fontsize=11, labelpad=10)
             axes[-1].set_xticks(range(0, 25, 2))
             
+            # Reverted to 0.0 for seamless stacked actogram styling
             plt.subplots_adjust(hspace=0.0)
             
             # Save the current figure as a new page in the PDF binder
